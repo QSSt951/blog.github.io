@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>Alpha的博客</title><link>https://mengmeng130402.github.io/mengmeng.github.io</link><description>记录一些平时的那些事儿</description><copyright>Alpha的博客</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/114229612?v=4</url><title>avatar</title><link>https://mengmeng130402.github.io/mengmeng.github.io</link></image><lastBuildDate>Wed, 22 Apr 2026 14:09:06 +0000</lastBuildDate><managingEditor>Alpha的博客</managingEditor><ttl>60</ttl><webMaster>Alpha的博客</webMaster><item><title>note.ms/0覆盖器（来自https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz）</title><link>https://mengmeng130402.github.io/mengmeng.github.io/post/note.ms-0-fu-gai-qi-%EF%BC%88-lai-zi-https---note.ms-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%EF%BC%89.html</link><description># note.ms/0 覆盖器
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>Alpha的博客</title><link>https://QSSt951.github.io/blog.github.io</link><description>记录一些平时的那些事儿</description><copyright>Alpha的博客</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://avatars.githubusercontent.com/u/114229612?v=4</url><title>avatar</title><link>https://QSSt951.github.io/blog.github.io</link></image><lastBuildDate>Wed, 22 Apr 2026 16:58:06 +0000</lastBuildDate><managingEditor>Alpha的博客</managingEditor><ttl>60</ttl><webMaster>Alpha的博客</webMaster><item><title>note.ms/0覆盖器（来自https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz）</title><link>https://QSSt951.github.io/blog.github.io/post/note.ms-0-fu-gai-qi-%EF%BC%88-lai-zi-https---note.ms-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%EF%BC%89.html</link><description># note.ms/0 覆盖器
 ### 从https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 找的，记录一下，避免没了什么的
 
 ## 内容如下（侵删,稍微加了点儿markdown的东西）
@@ -368,11 +368,11 @@ if __name__ == '__main__':
         print('\n程序被用户中断')
     except Exception as e:
         print(f'程序异常: {e}')
-```。</description><guid isPermaLink="true">https://mengmeng130402.github.io/mengmeng.github.io/post/note.ms-0-fu-gai-qi-%EF%BC%88-lai-zi-https---note.ms-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%EF%BC%89.html</guid><pubDate>Wed, 22 Apr 2026 13:54:43 +0000</pubDate></item><item><title>OI的梗</title><link>https://mengmeng130402.github.io/mengmeng.github.io/post/OI-de-geng.html</link><description># OI的梗
+```。</description><guid isPermaLink="true">https://QSSt951.github.io/blog.github.io/post/note.ms-0-fu-gai-qi-%EF%BC%88-lai-zi-https---note.ms-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%EF%BC%89.html</guid><pubDate>Wed, 22 Apr 2026 13:54:43 +0000</pubDate></item><item><title>OI的梗</title><link>https://QSSt951.github.io/blog.github.io/post/OI-de-geng.html</link><description># OI的梗
 #### 从网络收集的，不是自己写的，侵删
 #### 仅供娱乐，请勿当真
 ----
-模拟只会猜题意，贪心只能过样例。</description><guid isPermaLink="true">https://mengmeng130402.github.io/mengmeng.github.io/post/OI-de-geng.html</guid><pubDate>Mon, 22 Dec 2025 14:49:06 +0000</pubDate></item><item><title>bit树笔记</title><link>https://mengmeng130402.github.io/mengmeng.github.io/post/bit-shu-bi-ji.html</link><description># bit树
+模拟只会猜题意，贪心只能过样例。</description><guid isPermaLink="true">https://QSSt951.github.io/blog.github.io/post/OI-de-geng.html</guid><pubDate>Mon, 22 Dec 2025 14:49:06 +0000</pubDate></item><item><title>bit树笔记</title><link>https://QSSt951.github.io/blog.github.io/post/bit-shu-bi-ji.html</link><description># bit树
 ## LSB
 ### 什么是LSB
 LSB全称'Least Significant Bit'，即“最低有效位”，也就是数字二进制中从低位开始的第一个1在哪一位
@@ -389,13 +389,13 @@ int LSB(int a){
 ### 什么是bit树
 bit树状数组可以解决连续和、前缀和的动态查询.
 bit树需要一个数组，这里叫bit
-那么bit[i]也就是以i结尾，长度为LSB（i） 的区间和。</description><guid isPermaLink="true">https://mengmeng130402.github.io/mengmeng.github.io/post/bit-shu-bi-ji.html</guid><pubDate>Fri, 02 May 2025 00:54:50 +0000</pubDate></item><item><title>六年级圆、扇形、圆柱与圆锥知识点整理</title><link>https://mengmeng130402.github.io/mengmeng.github.io/post/liu-nian-ji-yuan-%E3%80%81-shan-xing-%E3%80%81-yuan-zhu-yu-yuan-zhui-zhi-shi-dian-zheng-li.html</link><description># 六年级圆、扇形、圆柱与圆锥知识点整理
+那么bit[i]也就是以i结尾，长度为LSB（i） 的区间和。</description><guid isPermaLink="true">https://QSSt951.github.io/blog.github.io/post/bit-shu-bi-ji.html</guid><pubDate>Fri, 02 May 2025 00:54:50 +0000</pubDate></item><item><title>六年级圆、扇形、圆柱与圆锥知识点整理</title><link>https://QSSt951.github.io/blog.github.io/post/liu-nian-ji-yuan-%E3%80%81-shan-xing-%E3%80%81-yuan-zhu-yu-yuan-zhui-zhi-shi-dian-zheng-li.html</link><description># 六年级圆、扇形、圆柱与圆锥知识点整理
 
 ---
 
 ## 一、圆与扇形  
 ### 1. 圆的基本概念  
-- **圆心**：圆的中心点。</description><guid isPermaLink="true">https://mengmeng130402.github.io/mengmeng.github.io/post/liu-nian-ji-yuan-%E3%80%81-shan-xing-%E3%80%81-yuan-zhu-yu-yuan-zhui-zhi-shi-dian-zheng-li.html</guid><pubDate>Thu, 01 May 2025 07:48:56 +0000</pubDate></item><item><title>st表笔记</title><link>https://mengmeng130402.github.io/mengmeng.github.io/post/st-biao-bi-ji.html</link><description># st表
+- **圆心**：圆的中心点。</description><guid isPermaLink="true">https://QSSt951.github.io/blog.github.io/post/liu-nian-ji-yuan-%E3%80%81-shan-xing-%E3%80%81-yuan-zhu-yu-yuan-zhui-zhi-shi-dian-zheng-li.html</guid><pubDate>Thu, 01 May 2025 07:48:56 +0000</pubDate></item><item><title>st表笔记</title><link>https://QSSt951.github.io/blog.github.io/post/st-biao-bi-ji.html</link><description># st表
 用于解决RMQ(区间最值查询)
 ## 对数换底公式
 当a&gt;0，a≠1，b&gt;0，b≠1且N&gt;0时，
@@ -448,8 +448,8 @@ int main() {
 	return 0;
 }
 ```
-有错请指出。</description><guid isPermaLink="true">https://mengmeng130402.github.io/mengmeng.github.io/post/st-biao-bi-ji.html</guid><pubDate>Thu, 01 May 2025 04:41:35 +0000</pubDate></item><item><title>分块笔记</title><link>https://mengmeng130402.github.io/mengmeng.github.io/post/fen-kuai-bi-ji.html</link><description># 分块笔记&#13;
+有错请指出。</description><guid isPermaLink="true">https://QSSt951.github.io/blog.github.io/post/st-biao-bi-ji.html</guid><pubDate>Thu, 01 May 2025 04:41:35 +0000</pubDate></item><item><title>分块笔记</title><link>https://QSSt951.github.io/blog.github.io/post/fen-kuai-bi-ji.html</link><description># 分块笔记&#13;
 ## 问题&#13;
 在解决点、段更行、查询的时候，数据很多会超时&#13;
 ## 时间比较&#13;
-就已 点更新，段查询 (求区间总和)为例。</description><guid isPermaLink="true">https://mengmeng130402.github.io/mengmeng.github.io/post/fen-kuai-bi-ji.html</guid><pubDate>Thu, 24 Oct 2024 11:26:19 +0000</pubDate></item></channel></rss>
+就已 点更新，段查询 (求区间总和)为例。</description><guid isPermaLink="true">https://QSSt951.github.io/blog.github.io/post/fen-kuai-bi-ji.html</guid><pubDate>Thu, 24 Oct 2024 11:26:19 +0000</pubDate></item></channel></rss>
