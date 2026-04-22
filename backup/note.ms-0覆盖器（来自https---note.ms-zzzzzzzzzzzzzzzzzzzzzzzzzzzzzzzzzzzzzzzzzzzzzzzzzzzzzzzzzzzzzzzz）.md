@@ -1,5 +1,5 @@
 # note.ms/0 覆盖器
-### 从https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz找的，记录一下，避免没了什么的
+### 从https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 找的，记录一下，避免没了什么的
 
 ## 内容如下（侵删,稍微加了点儿markdown的东西）
 ***
