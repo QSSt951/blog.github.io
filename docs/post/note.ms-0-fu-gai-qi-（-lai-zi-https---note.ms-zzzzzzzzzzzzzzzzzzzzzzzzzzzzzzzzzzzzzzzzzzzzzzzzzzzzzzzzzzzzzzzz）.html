@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/114229612?v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="# note.ms/0 覆盖器
+### 从https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz找的，记录一下，避免没了什么的
+
+## 内容如下（侵删,稍微加了点儿markdown的东西）
+***
+#### 这是一个note.ms/0高频覆盖器
+如何使用:
+- 第一步创建XXX.py(前提你的电脑有python解释器)，复制一下代码并保存
+- 第二步在同一个地方创建text.txt,里面放上你想要覆盖的内容(切记内容不要违法)
+- 第三步下载相关依赖(不会的自己问AI,直接pip就行，特别简单)
+- 第四步直接运行！！！
+还有配置已为您调到最优速度，无需额外修改(想降低频率的修改POST_WAIT (网页提交等待时间) 改成3)
+
+另外我们会统计，如果使用人数足够我们会公开更多功能丰富的脚本!
+
+还有有钱的人可以去买代理ip池，然后再对这个脚本改造一下这样效率会大大提升(现在的速度已经是不氪金最高速度了，果然金钱可以解决一切问题……)
+
+程序对你的电脑没有恶意，不信问AI“这段代码是不是病毒”
+```python
+import asyncio
+import logging
+import os
+import random
+import time
+import base64
+from dataclasses import dataclass
+from typing import List
+
+from playwright.async_api import async_playwright, Page
+
+
+# =========================
+# 配置区
+# =========================
+TEXT_FILE = 'text.txt'      # 基础内容文件
+DEFAULT_PAGES = 5          # 默认页面数量
+
+# 时间参数
+POST_WAIT = 2             # 网页提交等待时间（秒）
+PAGE_OPEN_DELAY = 0.5       # 打开页面间隔（秒）
+
+# 性能参数
+MAX_INFLIGHT_TASKS = 20     # 最大并行任务数
+BASE_INTERVAL =POST_WAIT/(DEFAULT_PAGES)         # 基础任务间隔（秒）
+
+# =========================
+# 解析器
+# =========================
+
+_TARGET_CONFIG = [
+    'aHR0cHM6Ly9ub3RlLm1zLw==',
+    'MA==',
+    'Pw=='
+]
+TEXTAREA_SELECTOR = 'textarea.content'
+
+def _get_target_url() -> str:
+    try:
+        parts = []
+        for part in _TARGET_CONFIG:
+            decoded = base64.b64decode(part).decode('utf-8')
+            parts.append(decoded)
+        return ''.join(parts)
+    except Exception:
+        return 'about:blank'
+
+
+# =========================
+# 日志设置
+# =========================
+def setup_logger() -> logging.Logger:
+    logger = logging.getLogger('injector')
+    logger.setLevel(logging.INFO)
+    
+    fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%H:%M:%S')
+    
+    ch = logging.StreamHandler()
+    ch.setFormatter(fmt)
+    
+    logger.addHandler(ch)
+    return logger
+
+
+# =========================
+# 内容微调器
+# =========================
+class ContentTweaker:
+    def __init__(self, base_file: str):
+        self.base_file = base_file
+        self._base_content = ''
+        self._last_mtime = 0
+        self._load_base_content()
+    
+    def _load_base_content(self):
+        '''加载基础内容'''
+        try:
+            with open(self.base_file, 'r', encoding='utf-8') as f:
+                self._base_content = f.read()
+            self._last_mtime = os.path.getmtime(self.base_file)
+        except FileNotFoundError:
+            print(f'错误：找不到文件 {self.base_file}')
+            print('请在相同目录下创建 text.txt 文件')
+            exit(1)
+    
+    def check_and_reload(self):
+        '''检查并重新加载文件（如果被修改）'''
+        try:
+            mtime = os.path.getmtime(self.base_file)
+            if mtime > self._last_mtime:
+                with open(self.base_file, 'r', encoding='utf-8') as f:
+                    self._base_content = f.read()
+                self._last_mtime = mtime
+                return True
+        except:
+            pass
+        return False
+    
+    def get_modified_content(self, injection_id: int) -> str:
+        content = self._base_content+' ' * ((injection_id // DEFAULT_PAGES) % 2)
+        return content
+
+
+# =========================
+# 页面句柄
+# =========================
+@dataclass
+class PageHandle:
+    idx: int
+    page: Page
+    busy: bool = False
+    last_inject_time: float = 0
+
+
+# =========================
+# 核心注入任务
+# =========================
+async def inject_content(
+    ph: PageHandle,
+    content: str,
+    logger: logging.Logger,
+    stats: dict
+):
+    '''向页面注入内容'''
+    ph.busy = True
+    start_time = time.monotonic()
+    
+    try:
+        await ph.page.evaluate(
+            '''([selector, value]) => {
+                const el = document.querySelector(selector);
+                if (!el) throw new Error('Textarea not found: ' + selector);
+                
+                el.value = value;
+                
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('keyup', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                
+                if ('_valueTracker' in el) {
+                    el._valueTracker.setValue(value);
+                }
+            }''',
+            [TEXTAREA_SELECTOR, content]
+        )
+        
+        await asyncio.sleep(POST_WAIT)
+        
+        elapsed = time.monotonic() - start_time
+        stats['success'] += 1
+        stats['total_time'] += elapsed
+        
+        logger.info(f'[P{ph.idx}] 注入完成 ({len(content)} chars, {elapsed:.2f}s)')
+        
+    except Exception as e:
+        stats['failed'] += 1
+        logger.error(f'[P{ph.idx}] 注入失败: {str(e)}')
+        
+        try:
+            await ph.page.reload(wait_until='domcontentloaded')
+            await asyncio.sleep(1)
+            logger.info(f'[P{ph.idx}] 页面已重载')
+        except:
+            logger.error(f'[P{ph.idx}] 页面重载失败')
+    
+    finally:
+        ph.busy = False
+        ph.last_inject_time = time.monotonic()
+
+
+# =========================
+# 调度器
+# =========================
+async def scheduler(
+    pages: List[PageHandle],
+    tweaker: ContentTweaker,
+    logger: logging.Logger
+):
+    '''调度注入任务'''
+    
+    stats = {
+        'success': 0,
+        'failed': 0,
+        'total_time': 0.0,
+        'start_time': time.monotonic()
+    }
+    
+    injection_counter = 0
+    inflight_tasks = set()
+    round_robin_index = 0
+    
+    logger.info(f'开始高频覆盖调度，页面数: {len(pages)}')
+    
+    try:
+        while True:
+            done_tasks = {t for t in inflight_tasks if t.done()}
+            for task in done_tasks:
+                try:
+                    await task
+                except Exception as e:
+                    logger.error(f'任务异常: {e}')
+            inflight_tasks -= done_tasks
+            
+            if tweaker.check_and_reload():
+                logger.info('检测到基础内容更新，已重新加载')
+            
+            if len(inflight_tasks) >= MAX_INFLIGHT_TASKS:
+                await asyncio.sleep(0.01)
+                continue
+            
+            selected_page = None
+            for _ in range(len(pages)):
+                ph = pages[round_robin_index % len(pages)]
+                round_robin_index += 1
+                
+                if not ph.busy:
+                    selected_page = ph
+                    break
+            
+            if selected_page is None:
+                await asyncio.sleep(0.01)
+                continue
+            
+            injection_counter += 1
+            content = tweaker.get_modified_content(injection_counter)
+            
+            task = asyncio.create_task(
+                inject_content(selected_page, content, logger, stats)
+            )
+            inflight_tasks.add(task)
+            
+            await asyncio.sleep(BASE_INTERVAL)
+            
+            if injection_counter % 100 == 0:
+                elapsed_total = time.monotonic() - stats['start_time']
+                success_rate = stats['success'] / (stats['success'] + stats['failed']) * 100 if (stats['success'] + stats['failed']) > 0 else 0
+                avg_time = stats['total_time'] / stats['success'] if stats['success'] > 0 else 0
+                
+                logger.info(
+                    f'统计: 成功={stats['success']}, 失败={stats['failed']}, '
+                    f'成功率={success_rate:.1f}%, 平均时间={avg_time:.2f}s, '
+                    f'总运行={elapsed_total:.0f}s'
+                )
+    
+    except KeyboardInterrupt:
+        logger.info('收到中断信号，正在清理...')
+        if inflight_tasks:
+            await asyncio.gather(*inflight_tasks, return_exceptions=True)
+        
+        elapsed_total = time.monotonic() - stats['start_time']
+        injections_per_sec = stats['success'] / elapsed_total if elapsed_total > 0 else 0
+        
+        logger.info('=' * 50)
+        logger.info(f'最终统计:')
+        logger.info(f'总注入次数: {stats['success']}')
+        logger.info(f'失败次数: {stats['failed']}')
+        logger.info(f'总运行时间: {elapsed_total:.1f}秒')
+        logger.info('=' * 50)
+
+
+# =========================
+# 页面池初始化
+# =========================
+async def init_pages(context, logger: logging.Logger) -> List[PageHandle]:
+    '''初始化页面池'''
+    pages = []
+    target_url = _get_target_url()
+    
+    for i in range(DEFAULT_PAGES):
+        try:
+            page = await context.new_page()
+            
+            await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+            
+            await page.wait_for_timeout(1000)
+            
+            textarea_count = await page.locator(TEXTAREA_SELECTOR).count()
+            if textarea_count == 0:
+                logger.warning(f'[P{i}] 页面未找到textarea，跳过')
+                await page.close()
+                continue
+            
+            ph = PageHandle(idx=i, page=page)
+            pages.append(ph)
+            logger.info(f'[P{i}] 页面就绪')
+            
+            await asyncio.sleep(PAGE_OPEN_DELAY)
+            
+        except Exception as e:
+            logger.error(f'[P{i}] 页面初始化失败: {e}')
+    
+    if not pages:
+        raise RuntimeError('没有成功初始化任何页面')
+    
+    return pages
+
+
+# =========================
+# 主函数
+# =========================
+async def main():
+    '''主程序'''
+    logger = setup_logger()
+    logger.info('启动高频覆盖程序')
+    
+    if not os.path.exists(TEXT_FILE):
+        logger.error(f'找不到基础内容文件: {TEXT_FILE}')
+        logger.info('请在程序目录创建 text.txt 文件')
+        return
+    
+    tweaker = ContentTweaker(TEXT_FILE)
+    
+    logger.info(f'使用 {DEFAULT_PAGES} 个页面进行高频覆盖')
+    
+    theoretical_max = DEFAULT_PAGES / POST_WAIT
+    logger.info(f'每次注入后等待: {POST_WAIT} 秒')
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox'
+            ]
+        )
+        
+        context = await browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        )
+        
+        try:
+            pages = await init_pages(context, logger)
+            
+            await scheduler(pages, tweaker, logger)
+            
+        finally:
+            await browser.close()
+            logger.info('程序结束')
+
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print('\n程序被用户中断')
+    except Exception as e:
+        print(f'程序异常: {e}')
+```。">
+<meta property="og:title" content="note.ms/0覆盖器（来自https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz）">
+<meta property="og:description" content="# note.ms/0 覆盖器
+### 从https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz找的，记录一下，避免没了什么的
+
+## 内容如下（侵删,稍微加了点儿markdown的东西）
+***
+#### 这是一个note.ms/0高频覆盖器
+如何使用:
+- 第一步创建XXX.py(前提你的电脑有python解释器)，复制一下代码并保存
+- 第二步在同一个地方创建text.txt,里面放上你想要覆盖的内容(切记内容不要违法)
+- 第三步下载相关依赖(不会的自己问AI,直接pip就行，特别简单)
+- 第四步直接运行！！！
+还有配置已为您调到最优速度，无需额外修改(想降低频率的修改POST_WAIT (网页提交等待时间) 改成3)
+
+另外我们会统计，如果使用人数足够我们会公开更多功能丰富的脚本!
+
+还有有钱的人可以去买代理ip池，然后再对这个脚本改造一下这样效率会大大提升(现在的速度已经是不氪金最高速度了，果然金钱可以解决一切问题……)
+
+程序对你的电脑没有恶意，不信问AI“这段代码是不是病毒”
+```python
+import asyncio
+import logging
+import os
+import random
+import time
+import base64
+from dataclasses import dataclass
+from typing import List
+
+from playwright.async_api import async_playwright, Page
+
+
+# =========================
+# 配置区
+# =========================
+TEXT_FILE = 'text.txt'      # 基础内容文件
+DEFAULT_PAGES = 5          # 默认页面数量
+
+# 时间参数
+POST_WAIT = 2             # 网页提交等待时间（秒）
+PAGE_OPEN_DELAY = 0.5       # 打开页面间隔（秒）
+
+# 性能参数
+MAX_INFLIGHT_TASKS = 20     # 最大并行任务数
+BASE_INTERVAL =POST_WAIT/(DEFAULT_PAGES)         # 基础任务间隔（秒）
+
+# =========================
+# 解析器
+# =========================
+
+_TARGET_CONFIG = [
+    'aHR0cHM6Ly9ub3RlLm1zLw==',
+    'MA==',
+    'Pw=='
+]
+TEXTAREA_SELECTOR = 'textarea.content'
+
+def _get_target_url() -> str:
+    try:
+        parts = []
+        for part in _TARGET_CONFIG:
+            decoded = base64.b64decode(part).decode('utf-8')
+            parts.append(decoded)
+        return ''.join(parts)
+    except Exception:
+        return 'about:blank'
+
+
+# =========================
+# 日志设置
+# =========================
+def setup_logger() -> logging.Logger:
+    logger = logging.getLogger('injector')
+    logger.setLevel(logging.INFO)
+    
+    fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%H:%M:%S')
+    
+    ch = logging.StreamHandler()
+    ch.setFormatter(fmt)
+    
+    logger.addHandler(ch)
+    return logger
+
+
+# =========================
+# 内容微调器
+# =========================
+class ContentTweaker:
+    def __init__(self, base_file: str):
+        self.base_file = base_file
+        self._base_content = ''
+        self._last_mtime = 0
+        self._load_base_content()
+    
+    def _load_base_content(self):
+        '''加载基础内容'''
+        try:
+            with open(self.base_file, 'r', encoding='utf-8') as f:
+                self._base_content = f.read()
+            self._last_mtime = os.path.getmtime(self.base_file)
+        except FileNotFoundError:
+            print(f'错误：找不到文件 {self.base_file}')
+            print('请在相同目录下创建 text.txt 文件')
+            exit(1)
+    
+    def check_and_reload(self):
+        '''检查并重新加载文件（如果被修改）'''
+        try:
+            mtime = os.path.getmtime(self.base_file)
+            if mtime > self._last_mtime:
+                with open(self.base_file, 'r', encoding='utf-8') as f:
+                    self._base_content = f.read()
+                self._last_mtime = mtime
+                return True
+        except:
+            pass
+        return False
+    
+    def get_modified_content(self, injection_id: int) -> str:
+        content = self._base_content+' ' * ((injection_id // DEFAULT_PAGES) % 2)
+        return content
+
+
+# =========================
+# 页面句柄
+# =========================
+@dataclass
+class PageHandle:
+    idx: int
+    page: Page
+    busy: bool = False
+    last_inject_time: float = 0
+
+
+# =========================
+# 核心注入任务
+# =========================
+async def inject_content(
+    ph: PageHandle,
+    content: str,
+    logger: logging.Logger,
+    stats: dict
+):
+    '''向页面注入内容'''
+    ph.busy = True
+    start_time = time.monotonic()
+    
+    try:
+        await ph.page.evaluate(
+            '''([selector, value]) => {
+                const el = document.querySelector(selector);
+                if (!el) throw new Error('Textarea not found: ' + selector);
+                
+                el.value = value;
+                
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('keyup', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                
+                if ('_valueTracker' in el) {
+                    el._valueTracker.setValue(value);
+                }
+            }''',
+            [TEXTAREA_SELECTOR, content]
+        )
+        
+        await asyncio.sleep(POST_WAIT)
+        
+        elapsed = time.monotonic() - start_time
+        stats['success'] += 1
+        stats['total_time'] += elapsed
+        
+        logger.info(f'[P{ph.idx}] 注入完成 ({len(content)} chars, {elapsed:.2f}s)')
+        
+    except Exception as e:
+        stats['failed'] += 1
+        logger.error(f'[P{ph.idx}] 注入失败: {str(e)}')
+        
+        try:
+            await ph.page.reload(wait_until='domcontentloaded')
+            await asyncio.sleep(1)
+            logger.info(f'[P{ph.idx}] 页面已重载')
+        except:
+            logger.error(f'[P{ph.idx}] 页面重载失败')
+    
+    finally:
+        ph.busy = False
+        ph.last_inject_time = time.monotonic()
+
+
+# =========================
+# 调度器
+# =========================
+async def scheduler(
+    pages: List[PageHandle],
+    tweaker: ContentTweaker,
+    logger: logging.Logger
+):
+    '''调度注入任务'''
+    
+    stats = {
+        'success': 0,
+        'failed': 0,
+        'total_time': 0.0,
+        'start_time': time.monotonic()
+    }
+    
+    injection_counter = 0
+    inflight_tasks = set()
+    round_robin_index = 0
+    
+    logger.info(f'开始高频覆盖调度，页面数: {len(pages)}')
+    
+    try:
+        while True:
+            done_tasks = {t for t in inflight_tasks if t.done()}
+            for task in done_tasks:
+                try:
+                    await task
+                except Exception as e:
+                    logger.error(f'任务异常: {e}')
+            inflight_tasks -= done_tasks
+            
+            if tweaker.check_and_reload():
+                logger.info('检测到基础内容更新，已重新加载')
+            
+            if len(inflight_tasks) >= MAX_INFLIGHT_TASKS:
+                await asyncio.sleep(0.01)
+                continue
+            
+            selected_page = None
+            for _ in range(len(pages)):
+                ph = pages[round_robin_index % len(pages)]
+                round_robin_index += 1
+                
+                if not ph.busy:
+                    selected_page = ph
+                    break
+            
+            if selected_page is None:
+                await asyncio.sleep(0.01)
+                continue
+            
+            injection_counter += 1
+            content = tweaker.get_modified_content(injection_counter)
+            
+            task = asyncio.create_task(
+                inject_content(selected_page, content, logger, stats)
+            )
+            inflight_tasks.add(task)
+            
+            await asyncio.sleep(BASE_INTERVAL)
+            
+            if injection_counter % 100 == 0:
+                elapsed_total = time.monotonic() - stats['start_time']
+                success_rate = stats['success'] / (stats['success'] + stats['failed']) * 100 if (stats['success'] + stats['failed']) > 0 else 0
+                avg_time = stats['total_time'] / stats['success'] if stats['success'] > 0 else 0
+                
+                logger.info(
+                    f'统计: 成功={stats['success']}, 失败={stats['failed']}, '
+                    f'成功率={success_rate:.1f}%, 平均时间={avg_time:.2f}s, '
+                    f'总运行={elapsed_total:.0f}s'
+                )
+    
+    except KeyboardInterrupt:
+        logger.info('收到中断信号，正在清理...')
+        if inflight_tasks:
+            await asyncio.gather(*inflight_tasks, return_exceptions=True)
+        
+        elapsed_total = time.monotonic() - stats['start_time']
+        injections_per_sec = stats['success'] / elapsed_total if elapsed_total > 0 else 0
+        
+        logger.info('=' * 50)
+        logger.info(f'最终统计:')
+        logger.info(f'总注入次数: {stats['success']}')
+        logger.info(f'失败次数: {stats['failed']}')
+        logger.info(f'总运行时间: {elapsed_total:.1f}秒')
+        logger.info('=' * 50)
+
+
+# =========================
+# 页面池初始化
+# =========================
+async def init_pages(context, logger: logging.Logger) -> List[PageHandle]:
+    '''初始化页面池'''
+    pages = []
+    target_url = _get_target_url()
+    
+    for i in range(DEFAULT_PAGES):
+        try:
+            page = await context.new_page()
+            
+            await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+            
+            await page.wait_for_timeout(1000)
+            
+            textarea_count = await page.locator(TEXTAREA_SELECTOR).count()
+            if textarea_count == 0:
+                logger.warning(f'[P{i}] 页面未找到textarea，跳过')
+                await page.close()
+                continue
+            
+            ph = PageHandle(idx=i, page=page)
+            pages.append(ph)
+            logger.info(f'[P{i}] 页面就绪')
+            
+            await asyncio.sleep(PAGE_OPEN_DELAY)
+            
+        except Exception as e:
+            logger.error(f'[P{i}] 页面初始化失败: {e}')
+    
+    if not pages:
+        raise RuntimeError('没有成功初始化任何页面')
+    
+    return pages
+
+
+# =========================
+# 主函数
+# =========================
+async def main():
+    '''主程序'''
+    logger = setup_logger()
+    logger.info('启动高频覆盖程序')
+    
+    if not os.path.exists(TEXT_FILE):
+        logger.error(f'找不到基础内容文件: {TEXT_FILE}')
+        logger.info('请在程序目录创建 text.txt 文件')
+        return
+    
+    tweaker = ContentTweaker(TEXT_FILE)
+    
+    logger.info(f'使用 {DEFAULT_PAGES} 个页面进行高频覆盖')
+    
+    theoretical_max = DEFAULT_PAGES / POST_WAIT
+    logger.info(f'每次注入后等待: {POST_WAIT} 秒')
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox'
+            ]
+        )
+        
+        context = await browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        )
+        
+        try:
+            pages = await init_pages(context, logger)
+            
+            await scheduler(pages, tweaker, logger)
+            
+        finally:
+            await browser.close()
+            logger.info('程序结束')
+
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print('\n程序被用户中断')
+    except Exception as e:
+        print(f'程序异常: {e}')
+```。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mengmeng130402.github.io/mengmeng.github.io/post/note.ms-0-fu-gai-qi-%EF%BC%88-lai-zi-https---note.ms-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%EF%BC%89.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/114229612?v=4">
+<title>note.ms/0覆盖器（来自https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz）</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">note.ms/0覆盖器（来自https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz）</h1>
+<div class="title-right">
+    <a href="https://mengmeng130402.github.io/mengmeng.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/QSSt951/mengmeng.github.io/issues/13" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h1>note.ms/0 覆盖器</h1>
+<h3>从<a href="https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%E6%89%BE%E7%9A%84%EF%BC%8C%E8%AE%B0%E5%BD%95%E4%B8%80%E4%B8%8B%EF%BC%8C%E9%81%BF%E5%85%8D%E6%B2%A1%E4%BA%86%E4%BB%80%E4%B9%88%E7%9A%84" rel="nofollow">https://note.ms/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz找的，记录一下，避免没了什么的</a></h3>
+<h2>内容如下（侵删,稍微加了点儿markdown的东西）</h2>
+<hr>
+<h4>这是一个note.ms/0高频覆盖器</h4>
+<p>如何使用:</p>
+<ul>
+<li>第一步创建XXX.py(前提你的电脑有python解释器)，复制一下代码并保存</li>
+<li>第二步在同一个地方创建text.txt,里面放上你想要覆盖的内容(切记内容不要违法)</li>
+<li>第三步下载相关依赖(不会的自己问AI,直接pip就行，特别简单)</li>
+<li>第四步直接运行！！！<br>
+还有配置已为您调到最优速度，无需额外修改(想降低频率的修改POST_WAIT (网页提交等待时间) 改成3)</li>
+</ul>
+<p>另外我们会统计，如果使用人数足够我们会公开更多功能丰富的脚本!</p>
+<p>还有有钱的人可以去买代理ip池，然后再对这个脚本改造一下这样效率会大大提升(现在的速度已经是不氪金最高速度了，果然金钱可以解决一切问题……)</p>
+<p>程序对你的电脑没有恶意，不信问AI“这段代码是不是病毒”</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">import</span> <span class="pl-s1">asyncio</span>
+<span class="pl-k">import</span> <span class="pl-s1">logging</span>
+<span class="pl-k">import</span> <span class="pl-s1">os</span>
+<span class="pl-k">import</span> <span class="pl-s1">random</span>
+<span class="pl-k">import</span> <span class="pl-s1">time</span>
+<span class="pl-k">import</span> <span class="pl-s1">base64</span>
+<span class="pl-k">from</span> <span class="pl-s1">dataclasses</span> <span class="pl-k">import</span> <span class="pl-s1">dataclass</span>
+<span class="pl-k">from</span> <span class="pl-s1">typing</span> <span class="pl-k">import</span> <span class="pl-v">List</span>
+
+<span class="pl-k">from</span> <span class="pl-s1">playwright</span>.<span class="pl-s1">async_api</span> <span class="pl-k">import</span> <span class="pl-s1">async_playwright</span>, <span class="pl-v">Page</span>
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 配置区</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-c1">TEXT_FILE</span> <span class="pl-c1">=</span> <span class="pl-s">"text.txt"</span>      <span class="pl-c"># 基础内容文件</span>
+<span class="pl-c1">DEFAULT_PAGES</span> <span class="pl-c1">=</span> <span class="pl-c1">5</span>          <span class="pl-c"># 默认页面数量</span>
+
+<span class="pl-c"># 时间参数</span>
+<span class="pl-c1">POST_WAIT</span> <span class="pl-c1">=</span> <span class="pl-c1">2</span>             <span class="pl-c"># 网页提交等待时间（秒）</span>
+<span class="pl-c1">PAGE_OPEN_DELAY</span> <span class="pl-c1">=</span> <span class="pl-c1">0.5</span>       <span class="pl-c"># 打开页面间隔（秒）</span>
+
+<span class="pl-c"># 性能参数</span>
+<span class="pl-c1">MAX_INFLIGHT_TASKS</span> <span class="pl-c1">=</span> <span class="pl-c1">20</span>     <span class="pl-c"># 最大并行任务数</span>
+<span class="pl-c1">BASE_INTERVAL</span> <span class="pl-c1">=</span><span class="pl-c1">POST_WAIT</span><span class="pl-c1">/</span>(<span class="pl-c1">DEFAULT_PAGES</span>)         <span class="pl-c"># 基础任务间隔（秒）</span>
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 解析器</span>
+<span class="pl-c"># =========================</span>
+
+<span class="pl-s1">_TARGET_CONFIG</span> <span class="pl-c1">=</span> [
+    <span class="pl-s">"aHR0cHM6Ly9ub3RlLm1zLw=="</span>,
+    <span class="pl-s">"MA=="</span>,
+    <span class="pl-s">"Pw=="</span>
+]
+<span class="pl-c1">TEXTAREA_SELECTOR</span> <span class="pl-c1">=</span> <span class="pl-s">"textarea.content"</span>
+
+<span class="pl-k">def</span> <span class="pl-en">_get_target_url</span>() <span class="pl-c1">-&gt;</span> <span class="pl-smi">str</span>:
+    <span class="pl-k">try</span>:
+        <span class="pl-s1">parts</span> <span class="pl-c1">=</span> []
+        <span class="pl-k">for</span> <span class="pl-s1">part</span> <span class="pl-c1">in</span> <span class="pl-s1">_TARGET_CONFIG</span>:
+            <span class="pl-s1">decoded</span> <span class="pl-c1">=</span> <span class="pl-s1">base64</span>.<span class="pl-c1">b64decode</span>(<span class="pl-s1">part</span>).<span class="pl-c1">decode</span>(<span class="pl-s">'utf-8'</span>)
+            <span class="pl-s1">parts</span>.<span class="pl-c1">append</span>(<span class="pl-s1">decoded</span>)
+        <span class="pl-k">return</span> <span class="pl-s">''</span>.<span class="pl-c1">join</span>(<span class="pl-s1">parts</span>)
+    <span class="pl-k">except</span> <span class="pl-v">Exception</span>:
+        <span class="pl-k">return</span> <span class="pl-s">"about:blank"</span>
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 日志设置</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-k">def</span> <span class="pl-en">setup_logger</span>() <span class="pl-c1">-&gt;</span> <span class="pl-s1">logging</span>.<span class="pl-c1">Logger</span>:
+    <span class="pl-s1">logger</span> <span class="pl-c1">=</span> <span class="pl-s1">logging</span>.<span class="pl-c1">getLogger</span>(<span class="pl-s">"injector"</span>)
+    <span class="pl-s1">logger</span>.<span class="pl-c1">setLevel</span>(<span class="pl-s1">logging</span>.<span class="pl-c1">INFO</span>)
+    
+    <span class="pl-s1">fmt</span> <span class="pl-c1">=</span> <span class="pl-s1">logging</span>.<span class="pl-c1">Formatter</span>(<span class="pl-s">"%(asctime)s [%(levelname)s] %(message)s"</span>, <span class="pl-s">"%H:%M:%S"</span>)
+    
+    <span class="pl-s1">ch</span> <span class="pl-c1">=</span> <span class="pl-s1">logging</span>.<span class="pl-c1">StreamHandler</span>()
+    <span class="pl-s1">ch</span>.<span class="pl-c1">setFormatter</span>(<span class="pl-s1">fmt</span>)
+    
+    <span class="pl-s1">logger</span>.<span class="pl-c1">addHandler</span>(<span class="pl-s1">ch</span>)
+    <span class="pl-k">return</span> <span class="pl-s1">logger</span>
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 内容微调器</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-k">class</span> <span class="pl-v">ContentTweaker</span>:
+    <span class="pl-k">def</span> <span class="pl-en">__init__</span>(<span class="pl-s1">self</span>, <span class="pl-s1">base_file</span>: <span class="pl-smi">str</span>):
+        <span class="pl-s1">self</span>.<span class="pl-c1">base_file</span> <span class="pl-c1">=</span> <span class="pl-s1">base_file</span>
+        <span class="pl-s1">self</span>.<span class="pl-c1">_base_content</span> <span class="pl-c1">=</span> <span class="pl-s">""</span>
+        <span class="pl-s1">self</span>.<span class="pl-c1">_last_mtime</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+        <span class="pl-s1">self</span>.<span class="pl-c1">_load_base_content</span>()
+    
+    <span class="pl-k">def</span> <span class="pl-en">_load_base_content</span>(<span class="pl-s1">self</span>):
+        <span class="pl-s">"""加载基础内容"""</span>
+        <span class="pl-k">try</span>:
+            <span class="pl-k">with</span> <span class="pl-en">open</span>(<span class="pl-s1">self</span>.<span class="pl-c1">base_file</span>, <span class="pl-s">"r"</span>, <span class="pl-s1">encoding</span><span class="pl-c1">=</span><span class="pl-s">"utf-8"</span>) <span class="pl-k">as</span> <span class="pl-s1">f</span>:
+                <span class="pl-s1">self</span>.<span class="pl-c1">_base_content</span> <span class="pl-c1">=</span> <span class="pl-s1">f</span>.<span class="pl-c1">read</span>()
+            <span class="pl-s1">self</span>.<span class="pl-c1">_last_mtime</span> <span class="pl-c1">=</span> <span class="pl-s1">os</span>.<span class="pl-c1">path</span>.<span class="pl-c1">getmtime</span>(<span class="pl-s1">self</span>.<span class="pl-c1">base_file</span>)
+        <span class="pl-k">except</span> <span class="pl-v">FileNotFoundError</span>:
+            <span class="pl-en">print</span>(<span class="pl-s">f"错误：找不到文件 <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">self</span>.<span class="pl-c1">base_file</span><span class="pl-kos">}</span></span>"</span>)
+            <span class="pl-en">print</span>(<span class="pl-s">"请在相同目录下创建 text.txt 文件"</span>)
+            <span class="pl-en">exit</span>(<span class="pl-c1">1</span>)
+    
+    <span class="pl-k">def</span> <span class="pl-en">check_and_reload</span>(<span class="pl-s1">self</span>):
+        <span class="pl-s">"""检查并重新加载文件（如果被修改）"""</span>
+        <span class="pl-k">try</span>:
+            <span class="pl-s1">mtime</span> <span class="pl-c1">=</span> <span class="pl-s1">os</span>.<span class="pl-c1">path</span>.<span class="pl-c1">getmtime</span>(<span class="pl-s1">self</span>.<span class="pl-c1">base_file</span>)
+            <span class="pl-k">if</span> <span class="pl-s1">mtime</span> <span class="pl-c1">&gt;</span> <span class="pl-s1">self</span>.<span class="pl-c1">_last_mtime</span>:
+                <span class="pl-k">with</span> <span class="pl-en">open</span>(<span class="pl-s1">self</span>.<span class="pl-c1">base_file</span>, <span class="pl-s">"r"</span>, <span class="pl-s1">encoding</span><span class="pl-c1">=</span><span class="pl-s">"utf-8"</span>) <span class="pl-k">as</span> <span class="pl-s1">f</span>:
+                    <span class="pl-s1">self</span>.<span class="pl-c1">_base_content</span> <span class="pl-c1">=</span> <span class="pl-s1">f</span>.<span class="pl-c1">read</span>()
+                <span class="pl-s1">self</span>.<span class="pl-c1">_last_mtime</span> <span class="pl-c1">=</span> <span class="pl-s1">mtime</span>
+                <span class="pl-k">return</span> <span class="pl-c1">True</span>
+        <span class="pl-k">except</span>:
+            <span class="pl-k">pass</span>
+        <span class="pl-k">return</span> <span class="pl-c1">False</span>
+    
+    <span class="pl-k">def</span> <span class="pl-en">get_modified_content</span>(<span class="pl-s1">self</span>, <span class="pl-s1">injection_id</span>: <span class="pl-smi">int</span>) <span class="pl-c1">-&gt;</span> <span class="pl-smi">str</span>:
+        <span class="pl-s1">content</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">_base_content</span><span class="pl-c1">+</span><span class="pl-s">" "</span> <span class="pl-c1">*</span> ((<span class="pl-s1">injection_id</span> <span class="pl-c1">//</span> <span class="pl-c1">DEFAULT_PAGES</span>) <span class="pl-c1">%</span> <span class="pl-c1">2</span>)
+        <span class="pl-k">return</span> <span class="pl-s1">content</span>
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 页面句柄</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-en">@<span class="pl-s1">dataclass</span></span>
+<span class="pl-k">class</span> <span class="pl-v">PageHandle</span>:
+    <span class="pl-s1">idx</span>: <span class="pl-smi">int</span>
+    <span class="pl-s1">page</span>: <span class="pl-smi">Page</span>
+    <span class="pl-s1">busy</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+    <span class="pl-s1">last_inject_time</span>: <span class="pl-smi">float</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 核心注入任务</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-k">async</span> <span class="pl-k">def</span> <span class="pl-en">inject_content</span>(
+    <span class="pl-s1">ph</span>: <span class="pl-smi">PageHandle</span>,
+    <span class="pl-s1">content</span>: <span class="pl-smi">str</span>,
+    <span class="pl-s1">logger</span>: <span class="pl-s1">logging</span>.<span class="pl-c1">Logger</span>,
+    <span class="pl-s1">stats</span>: <span class="pl-smi">dict</span>
+):
+    <span class="pl-s">"""向页面注入内容"""</span>
+    <span class="pl-s1">ph</span>.<span class="pl-c1">busy</span> <span class="pl-c1">=</span> <span class="pl-c1">True</span>
+    <span class="pl-s1">start_time</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">monotonic</span>()
+    
+    <span class="pl-k">try</span>:
+        <span class="pl-k">await</span> <span class="pl-s1">ph</span>.<span class="pl-c1">page</span>.<span class="pl-c1">evaluate</span>(
+            <span class="pl-s">"""([selector, value]) =&gt; {</span>
+<span class="pl-s">                const el = document.querySelector(selector);</span>
+<span class="pl-s">                if (!el) throw new Error("Textarea not found: " + selector);</span>
+<span class="pl-s">                </span>
+<span class="pl-s">                el.value = value;</span>
+<span class="pl-s">                </span>
+<span class="pl-s">                el.dispatchEvent(new Event('input', { bubbles: true }));</span>
+<span class="pl-s">                el.dispatchEvent(new Event('change', { bubbles: true }));</span>
+<span class="pl-s">                el.dispatchEvent(new Event('keyup', { bubbles: true }));</span>
+<span class="pl-s">                el.dispatchEvent(new Event('blur', { bubbles: true }));</span>
+<span class="pl-s">                </span>
+<span class="pl-s">                if ('_valueTracker' in el) {</span>
+<span class="pl-s">                    el._valueTracker.setValue(value);</span>
+<span class="pl-s">                }</span>
+<span class="pl-s">            }"""</span>,
+            [<span class="pl-c1">TEXTAREA_SELECTOR</span>, <span class="pl-s1">content</span>]
+        )
+        
+        <span class="pl-k">await</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">sleep</span>(<span class="pl-c1">POST_WAIT</span>)
+        
+        <span class="pl-s1">elapsed</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">monotonic</span>() <span class="pl-c1">-</span> <span class="pl-s1">start_time</span>
+        <span class="pl-s1">stats</span>[<span class="pl-s">"success"</span>] <span class="pl-c1">+=</span> <span class="pl-c1">1</span>
+        <span class="pl-s1">stats</span>[<span class="pl-s">"total_time"</span>] <span class="pl-c1">+=</span> <span class="pl-s1">elapsed</span>
+        
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"[P<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">ph</span>.<span class="pl-c1">idx</span><span class="pl-kos">}</span></span>] 注入完成 (<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-en">len</span>(<span class="pl-s1">content</span>)<span class="pl-kos">}</span></span> chars, <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">elapsed</span>:.2f<span class="pl-kos">}</span></span>s)"</span>)
+        
+    <span class="pl-k">except</span> <span class="pl-v">Exception</span> <span class="pl-k">as</span> <span class="pl-s1">e</span>:
+        <span class="pl-s1">stats</span>[<span class="pl-s">"failed"</span>] <span class="pl-c1">+=</span> <span class="pl-c1">1</span>
+        <span class="pl-s1">logger</span>.<span class="pl-c1">error</span>(<span class="pl-s">f"[P<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">ph</span>.<span class="pl-c1">idx</span><span class="pl-kos">}</span></span>] 注入失败: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-en">str</span>(<span class="pl-s1">e</span>)<span class="pl-kos">}</span></span>"</span>)
+        
+        <span class="pl-k">try</span>:
+            <span class="pl-k">await</span> <span class="pl-s1">ph</span>.<span class="pl-c1">page</span>.<span class="pl-c1">reload</span>(<span class="pl-s1">wait_until</span><span class="pl-c1">=</span><span class="pl-s">"domcontentloaded"</span>)
+            <span class="pl-k">await</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">sleep</span>(<span class="pl-c1">1</span>)
+            <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"[P<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">ph</span>.<span class="pl-c1">idx</span><span class="pl-kos">}</span></span>] 页面已重载"</span>)
+        <span class="pl-k">except</span>:
+            <span class="pl-s1">logger</span>.<span class="pl-c1">error</span>(<span class="pl-s">f"[P<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">ph</span>.<span class="pl-c1">idx</span><span class="pl-kos">}</span></span>] 页面重载失败"</span>)
+    
+    <span class="pl-k">finally</span>:
+        <span class="pl-s1">ph</span>.<span class="pl-c1">busy</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+        <span class="pl-s1">ph</span>.<span class="pl-c1">last_inject_time</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">monotonic</span>()
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 调度器</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-k">async</span> <span class="pl-k">def</span> <span class="pl-en">scheduler</span>(
+    <span class="pl-s1">pages</span>: <span class="pl-v">List</span>[<span class="pl-smi">PageHandle</span>],
+    <span class="pl-s1">tweaker</span>: <span class="pl-smi">ContentTweaker</span>,
+    <span class="pl-s1">logger</span>: <span class="pl-s1">logging</span>.<span class="pl-c1">Logger</span>
+):
+    <span class="pl-s">"""调度注入任务"""</span>
+    
+    <span class="pl-s1">stats</span> <span class="pl-c1">=</span> {
+        <span class="pl-s">"success"</span>: <span class="pl-c1">0</span>,
+        <span class="pl-s">"failed"</span>: <span class="pl-c1">0</span>,
+        <span class="pl-s">"total_time"</span>: <span class="pl-c1">0.0</span>,
+        <span class="pl-s">"start_time"</span>: <span class="pl-s1">time</span>.<span class="pl-c1">monotonic</span>()
+    }
+    
+    <span class="pl-s1">injection_counter</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+    <span class="pl-s1">inflight_tasks</span> <span class="pl-c1">=</span> <span class="pl-en">set</span>()
+    <span class="pl-s1">round_robin_index</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+    
+    <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"开始高频覆盖调度，页面数: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-en">len</span>(<span class="pl-s1">pages</span>)<span class="pl-kos">}</span></span>"</span>)
+    
+    <span class="pl-k">try</span>:
+        <span class="pl-k">while</span> <span class="pl-c1">True</span>:
+            <span class="pl-s1">done_tasks</span> <span class="pl-c1">=</span> {<span class="pl-s1">t</span> <span class="pl-k">for</span> <span class="pl-s1">t</span> <span class="pl-c1">in</span> <span class="pl-s1">inflight_tasks</span> <span class="pl-k">if</span> <span class="pl-s1">t</span>.<span class="pl-c1">done</span>()}
+            <span class="pl-k">for</span> <span class="pl-s1">task</span> <span class="pl-c1">in</span> <span class="pl-s1">done_tasks</span>:
+                <span class="pl-k">try</span>:
+                    <span class="pl-k">await</span> <span class="pl-s1">task</span>
+                <span class="pl-k">except</span> <span class="pl-v">Exception</span> <span class="pl-k">as</span> <span class="pl-s1">e</span>:
+                    <span class="pl-s1">logger</span>.<span class="pl-c1">error</span>(<span class="pl-s">f"任务异常: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">e</span><span class="pl-kos">}</span></span>"</span>)
+            <span class="pl-s1">inflight_tasks</span> <span class="pl-c1">-=</span> <span class="pl-s1">done_tasks</span>
+            
+            <span class="pl-k">if</span> <span class="pl-s1">tweaker</span>.<span class="pl-c1">check_and_reload</span>():
+                <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">"检测到基础内容更新，已重新加载"</span>)
+            
+            <span class="pl-k">if</span> <span class="pl-en">len</span>(<span class="pl-s1">inflight_tasks</span>) <span class="pl-c1">&gt;=</span> <span class="pl-c1">MAX_INFLIGHT_TASKS</span>:
+                <span class="pl-k">await</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">sleep</span>(<span class="pl-c1">0.01</span>)
+                <span class="pl-k">continue</span>
+            
+            <span class="pl-s1">selected_page</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+            <span class="pl-k">for</span> <span class="pl-s1">_</span> <span class="pl-c1">in</span> <span class="pl-en">range</span>(<span class="pl-en">len</span>(<span class="pl-s1">pages</span>)):
+                <span class="pl-s1">ph</span> <span class="pl-c1">=</span> <span class="pl-s1">pages</span>[<span class="pl-s1">round_robin_index</span> <span class="pl-c1">%</span> <span class="pl-en">len</span>(<span class="pl-s1">pages</span>)]
+                <span class="pl-s1">round_robin_index</span> <span class="pl-c1">+=</span> <span class="pl-c1">1</span>
+                
+                <span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">ph</span>.<span class="pl-c1">busy</span>:
+                    <span class="pl-s1">selected_page</span> <span class="pl-c1">=</span> <span class="pl-s1">ph</span>
+                    <span class="pl-k">break</span>
+            
+            <span class="pl-k">if</span> <span class="pl-s1">selected_page</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span>:
+                <span class="pl-k">await</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">sleep</span>(<span class="pl-c1">0.01</span>)
+                <span class="pl-k">continue</span>
+            
+            <span class="pl-s1">injection_counter</span> <span class="pl-c1">+=</span> <span class="pl-c1">1</span>
+            <span class="pl-s1">content</span> <span class="pl-c1">=</span> <span class="pl-s1">tweaker</span>.<span class="pl-c1">get_modified_content</span>(<span class="pl-s1">injection_counter</span>)
+            
+            <span class="pl-s1">task</span> <span class="pl-c1">=</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">create_task</span>(
+                <span class="pl-en">inject_content</span>(<span class="pl-s1">selected_page</span>, <span class="pl-s1">content</span>, <span class="pl-s1">logger</span>, <span class="pl-s1">stats</span>)
+            )
+            <span class="pl-s1">inflight_tasks</span>.<span class="pl-c1">add</span>(<span class="pl-s1">task</span>)
+            
+            <span class="pl-k">await</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">sleep</span>(<span class="pl-c1">BASE_INTERVAL</span>)
+            
+            <span class="pl-k">if</span> <span class="pl-s1">injection_counter</span> <span class="pl-c1">%</span> <span class="pl-c1">100</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>:
+                <span class="pl-s1">elapsed_total</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">monotonic</span>() <span class="pl-c1">-</span> <span class="pl-s1">stats</span>[<span class="pl-s">"start_time"</span>]
+                <span class="pl-s1">success_rate</span> <span class="pl-c1">=</span> <span class="pl-s1">stats</span>[<span class="pl-s">"success"</span>] <span class="pl-c1">/</span> (<span class="pl-s1">stats</span>[<span class="pl-s">"success"</span>] <span class="pl-c1">+</span> <span class="pl-s1">stats</span>[<span class="pl-s">"failed"</span>]) <span class="pl-c1">*</span> <span class="pl-c1">100</span> <span class="pl-k">if</span> (<span class="pl-s1">stats</span>[<span class="pl-s">"success"</span>] <span class="pl-c1">+</span> <span class="pl-s1">stats</span>[<span class="pl-s">"failed"</span>]) <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span> <span class="pl-k">else</span> <span class="pl-c1">0</span>
+                <span class="pl-s1">avg_time</span> <span class="pl-c1">=</span> <span class="pl-s1">stats</span>[<span class="pl-s">"total_time"</span>] <span class="pl-c1">/</span> <span class="pl-s1">stats</span>[<span class="pl-s">"success"</span>] <span class="pl-k">if</span> <span class="pl-s1">stats</span>[<span class="pl-s">"success"</span>] <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span> <span class="pl-k">else</span> <span class="pl-c1">0</span>
+                
+                <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(
+                    <span class="pl-s">f"统计: 成功=<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">stats</span>[<span class="pl-s">'success'</span>]<span class="pl-kos">}</span></span>, 失败=<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">stats</span>[<span class="pl-s">'failed'</span>]<span class="pl-kos">}</span></span>, "</span>
+                    <span class="pl-s">f"成功率=<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">success_rate</span>:.1f<span class="pl-kos">}</span></span>%, 平均时间=<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">avg_time</span>:.2f<span class="pl-kos">}</span></span>s, "</span>
+                    <span class="pl-s">f"总运行=<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">elapsed_total</span>:.0f<span class="pl-kos">}</span></span>s"</span>
+                )
+    
+    <span class="pl-k">except</span> <span class="pl-v">KeyboardInterrupt</span>:
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">"收到中断信号，正在清理..."</span>)
+        <span class="pl-k">if</span> <span class="pl-s1">inflight_tasks</span>:
+            <span class="pl-k">await</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">gather</span>(<span class="pl-c1">*</span><span class="pl-s1">inflight_tasks</span>, <span class="pl-s1">return_exceptions</span><span class="pl-c1">=</span><span class="pl-c1">True</span>)
+        
+        <span class="pl-s1">elapsed_total</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">monotonic</span>() <span class="pl-c1">-</span> <span class="pl-s1">stats</span>[<span class="pl-s">"start_time"</span>]
+        <span class="pl-s1">injections_per_sec</span> <span class="pl-c1">=</span> <span class="pl-s1">stats</span>[<span class="pl-s">"success"</span>] <span class="pl-c1">/</span> <span class="pl-s1">elapsed_total</span> <span class="pl-k">if</span> <span class="pl-s1">elapsed_total</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span> <span class="pl-k">else</span> <span class="pl-c1">0</span>
+        
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">"="</span> <span class="pl-c1">*</span> <span class="pl-c1">50</span>)
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"最终统计:"</span>)
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"总注入次数: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">stats</span>[<span class="pl-s">'success'</span>]<span class="pl-kos">}</span></span>"</span>)
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"失败次数: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">stats</span>[<span class="pl-s">'failed'</span>]<span class="pl-kos">}</span></span>"</span>)
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"总运行时间: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">elapsed_total</span>:.1f<span class="pl-kos">}</span></span>秒"</span>)
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">"="</span> <span class="pl-c1">*</span> <span class="pl-c1">50</span>)
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 页面池初始化</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-k">async</span> <span class="pl-k">def</span> <span class="pl-en">init_pages</span>(<span class="pl-s1">context</span>, <span class="pl-s1">logger</span>: <span class="pl-s1">logging</span>.<span class="pl-c1">Logger</span>) <span class="pl-c1">-&gt;</span> <span class="pl-v">List</span>[<span class="pl-smi">PageHandle</span>]:
+    <span class="pl-s">"""初始化页面池"""</span>
+    <span class="pl-s1">pages</span> <span class="pl-c1">=</span> []
+    <span class="pl-s1">target_url</span> <span class="pl-c1">=</span> <span class="pl-en">_get_target_url</span>()
+    
+    <span class="pl-k">for</span> <span class="pl-s1">i</span> <span class="pl-c1">in</span> <span class="pl-en">range</span>(<span class="pl-c1">DEFAULT_PAGES</span>):
+        <span class="pl-k">try</span>:
+            <span class="pl-s1">page</span> <span class="pl-c1">=</span> <span class="pl-k">await</span> <span class="pl-s1">context</span>.<span class="pl-c1">new_page</span>()
+            
+            <span class="pl-k">await</span> <span class="pl-s1">page</span>.<span class="pl-c1">goto</span>(<span class="pl-s1">target_url</span>, <span class="pl-s1">wait_until</span><span class="pl-c1">=</span><span class="pl-s">"domcontentloaded"</span>, <span class="pl-s1">timeout</span><span class="pl-c1">=</span><span class="pl-c1">30000</span>)
+            
+            <span class="pl-k">await</span> <span class="pl-s1">page</span>.<span class="pl-c1">wait_for_timeout</span>(<span class="pl-c1">1000</span>)
+            
+            <span class="pl-s1">textarea_count</span> <span class="pl-c1">=</span> <span class="pl-k">await</span> <span class="pl-s1">page</span>.<span class="pl-c1">locator</span>(<span class="pl-c1">TEXTAREA_SELECTOR</span>).<span class="pl-c1">count</span>()
+            <span class="pl-k">if</span> <span class="pl-s1">textarea_count</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>:
+                <span class="pl-s1">logger</span>.<span class="pl-c1">warning</span>(<span class="pl-s">f"[P<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">i</span><span class="pl-kos">}</span></span>] 页面未找到textarea，跳过"</span>)
+                <span class="pl-k">await</span> <span class="pl-s1">page</span>.<span class="pl-c1">close</span>()
+                <span class="pl-k">continue</span>
+            
+            <span class="pl-s1">ph</span> <span class="pl-c1">=</span> <span class="pl-en">PageHandle</span>(<span class="pl-s1">idx</span><span class="pl-c1">=</span><span class="pl-s1">i</span>, <span class="pl-s1">page</span><span class="pl-c1">=</span><span class="pl-s1">page</span>)
+            <span class="pl-s1">pages</span>.<span class="pl-c1">append</span>(<span class="pl-s1">ph</span>)
+            <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"[P<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">i</span><span class="pl-kos">}</span></span>] 页面就绪"</span>)
+            
+            <span class="pl-k">await</span> <span class="pl-s1">asyncio</span>.<span class="pl-c1">sleep</span>(<span class="pl-c1">PAGE_OPEN_DELAY</span>)
+            
+        <span class="pl-k">except</span> <span class="pl-v">Exception</span> <span class="pl-k">as</span> <span class="pl-s1">e</span>:
+            <span class="pl-s1">logger</span>.<span class="pl-c1">error</span>(<span class="pl-s">f"[P<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">i</span><span class="pl-kos">}</span></span>] 页面初始化失败: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">e</span><span class="pl-kos">}</span></span>"</span>)
+    
+    <span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">pages</span>:
+        <span class="pl-k">raise</span> <span class="pl-en">RuntimeError</span>(<span class="pl-s">"没有成功初始化任何页面"</span>)
+    
+    <span class="pl-k">return</span> <span class="pl-s1">pages</span>
+
+
+<span class="pl-c"># =========================</span>
+<span class="pl-c"># 主函数</span>
+<span class="pl-c"># =========================</span>
+<span class="pl-k">async</span> <span class="pl-k">def</span> <span class="pl-en">main</span>():
+    <span class="pl-s">"""主程序"""</span>
+    <span class="pl-s1">logger</span> <span class="pl-c1">=</span> <span class="pl-en">setup_logger</span>()
+    <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">"启动高频覆盖程序"</span>)
+    
+    <span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">os</span>.<span class="pl-c1">path</span>.<span class="pl-c1">exists</span>(<span class="pl-c1">TEXT_FILE</span>):
+        <span class="pl-s1">logger</span>.<span class="pl-c1">error</span>(<span class="pl-s">f"找不到基础内容文件: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-c1">TEXT_FILE</span><span class="pl-kos">}</span></span>"</span>)
+        <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">"请在程序目录创建 text.txt 文件"</span>)
+        <span class="pl-k">return</span>
+    
+    <span class="pl-s1">tweaker</span> <span class="pl-c1">=</span> <span class="pl-en">ContentTweaker</span>(<span class="pl-c1">TEXT_FILE</span>)
+    
+    <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"使用 <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-c1">DEFAULT_PAGES</span><span class="pl-kos">}</span></span> 个页面进行高频覆盖"</span>)
+    
+    <span class="pl-s1">theoretical_max</span> <span class="pl-c1">=</span> <span class="pl-c1">DEFAULT_PAGES</span> <span class="pl-c1">/</span> <span class="pl-c1">POST_WAIT</span>
+    <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">f"每次注入后等待: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-c1">POST_WAIT</span><span class="pl-kos">}</span></span> 秒"</span>)
+    
+    <span class="pl-k">async</span> <span class="pl-k">with</span> <span class="pl-en">async_playwright</span>() <span class="pl-k">as</span> <span class="pl-s1">p</span>:
+        <span class="pl-s1">browser</span> <span class="pl-c1">=</span> <span class="pl-k">await</span> <span class="pl-s1">p</span>.<span class="pl-c1">chromium</span>.<span class="pl-c1">launch</span>(
+            <span class="pl-s1">headless</span><span class="pl-c1">=</span><span class="pl-c1">True</span>,
+            <span class="pl-s1">args</span><span class="pl-c1">=</span>[
+                <span class="pl-s">'--disable-blink-features=AutomationControlled'</span>,
+                <span class="pl-s">'--disable-dev-shm-usage'</span>,
+                <span class="pl-s">'--no-sandbox'</span>
+            ]
+        )
+        
+        <span class="pl-s1">context</span> <span class="pl-c1">=</span> <span class="pl-k">await</span> <span class="pl-s1">browser</span>.<span class="pl-c1">new_context</span>(
+            <span class="pl-s1">viewport</span><span class="pl-c1">=</span>{<span class="pl-s">'width'</span>: <span class="pl-c1">1920</span>, <span class="pl-s">'height'</span>: <span class="pl-c1">1080</span>},
+            <span class="pl-s1">user_agent</span><span class="pl-c1">=</span><span class="pl-s">'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'</span>
+        )
+        
+        <span class="pl-k">try</span>:
+            <span class="pl-s1">pages</span> <span class="pl-c1">=</span> <span class="pl-k">await</span> <span class="pl-en">init_pages</span>(<span class="pl-s1">context</span>, <span class="pl-s1">logger</span>)
+            
+            <span class="pl-k">await</span> <span class="pl-en">scheduler</span>(<span class="pl-s1">pages</span>, <span class="pl-s1">tweaker</span>, <span class="pl-s1">logger</span>)
+            
+        <span class="pl-k">finally</span>:
+            <span class="pl-k">await</span> <span class="pl-s1">browser</span>.<span class="pl-c1">close</span>()
+            <span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(<span class="pl-s">"程序结束"</span>)
+
+
+<span class="pl-k">if</span> <span class="pl-s1">__name__</span> <span class="pl-c1">==</span> <span class="pl-s">"__main__"</span>:
+    <span class="pl-k">try</span>:
+        <span class="pl-s1">asyncio</span>.<span class="pl-c1">run</span>(<span class="pl-en">main</span>())
+    <span class="pl-k">except</span> <span class="pl-v">KeyboardInterrupt</span>:
+        <span class="pl-en">print</span>(<span class="pl-s">"<span class="pl-cce">\n</span>程序被用户中断"</span>)
+    <span class="pl-k">except</span> <span class="pl-v">Exception</span> <span class="pl-k">as</span> <span class="pl-s1">e</span>:
+        <span class="pl-en">print</span>(<span class="pl-s">f"程序异常: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">e</span><span class="pl-kos">}</span></span>"</span>)</pre></div></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://mengmeng130402.github.io/mengmeng.github.io">Alpha的博客</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","QSSt951/mengmeng.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+
+
+</html>
